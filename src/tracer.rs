@@ -1,21 +1,34 @@
 use nix::sys::ptrace;
 use nix::sys::wait::waitpid;
 use nix::unistd::Pid;
-use crate::file_monitor::handle_file_syscalls;
-use crate::network_monitor::handle_network_syscalls;
-use crate::security_monitor::handle_security_syscalls;
 
 pub fn trace_process(pid: Pid) {
+    // 프로세스에 ptrace 연결
+    println!("Attaching to PID {}...", pid);
+    ptrace::attach(pid).expect("Failed to attach to process");
+    println!("Attached!");
+    
+
     loop {
-        waitpid(pid, None).unwrap();
-        let regs = ptrace::getregs(pid).unwrap();
-        let syscall = regs.orig_rax; // 시스템 콜 번호
-
-        // 모듈별 처리
-        handle_file_syscalls(pid, syscall, &regs);
-        handle_network_syscalls(pid, syscall, &regs);
-        handle_security_syscalls(pid, syscall, &regs);
-
-        ptrace::syscall(pid, None).unwrap();
+        match waitpid(pid, None) {
+            Ok(_) => {
+                let regs = ptrace::getregs(pid);
+                match regs {
+                    Ok(regs) => {
+                        let syscall = regs.orig_rax;
+                        println!("PID {} called syscall: {}", pid, syscall);
+                    }
+                    Err(err) => {
+                        eprintln!("Failed to get registers for PID {}: {:?}", pid, err);
+                        break;
+                    }
+                }
+                ptrace::syscall(pid, None).unwrap();
+            }
+            Err(err) => {
+                eprintln!("Failed to wait for PID {}: {:?}", pid, err);
+                break;
+            }
+        }
     }
 }

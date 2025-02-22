@@ -4,8 +4,7 @@ mod network_monitor;
 mod security_monitor;
 mod logger;
 
-use nix::sys::ptrace;
-use nix::unistd::{fork, ForkResult, Pid};
+use nix::unistd::Pid;
 use std::env;
 use std::process::Command;
 
@@ -16,15 +15,19 @@ fn main() {
         return;
     }
 
-    match unsafe { fork() } {
-        Ok(ForkResult::Child) => {
-            ptrace::traceme().expect("Failed to ptrace");
-            Command::new(&args[1]).args(&args[2..]).exec();
-        }
-        Ok(ForkResult::Parent { child }) => {
-            println!("Monitoring PID: {}", child);
-            tracer::trace_process(child);
-        }
-        Err(_) => eprintln!("Fork failed"),
-    }
+    // 실행할 프로그램과 인자 설정
+    let program = &args[1];
+    let program_args = &args[2..];
+
+    // 자식 프로세스 실행
+    let child = Command::new(program)
+        .args(program_args)
+        .spawn()
+        .expect("Failed to start process");
+
+    let pid = Pid::from_raw(child.id() as i32);
+    println!("Monitoring PID: {}", pid);
+
+    // 시스템 콜 추적 시작
+    tracer::trace_process(pid);
 }
