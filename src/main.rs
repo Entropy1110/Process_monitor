@@ -2,32 +2,49 @@ mod tracer;
 mod file_monitor;
 mod network_monitor;
 mod security_monitor;
-mod logger;
 
+use structopt::StructOpt;
 use nix::unistd::Pid;
-use std::env;
 use std::process::Command;
 
+/// CLI 옵션 구조체 정의
+#[derive(StructOpt, Debug)]
+#[structopt(name = "syscall_monitor")]
+struct Opt {
+    /// target PIDs
+    #[structopt(short, long)]
+    pid: Option<i32>,
+
+    /// Program path to run
+    #[structopt(name = "PROGRAM", required_unless = "pid")]
+    program: Option<String>,
+
+    /// Arguments for the program
+    #[structopt(name = "ARGS", last = true)]
+    args: Vec<String>,
+
+    /// if set, prints all of the syscalls the program called
+    #[structopt(short, long, parse(from_occurrences))]
+    verbose: u8,
+}
+
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    if args.len() < 2 {
-        eprintln!("Usage: {} <program> [args...]", args[0]);
+    let opt = Opt::from_args();
+    
+    let pid = if let Some(pid) = opt.pid {
+        println!("Monitoring existing PID: {}", pid);
+        Pid::from_raw(pid)
+    } else if let Some(program) = opt.program {
+        println!("Starting and monitoring program: {}", program);
+        let child = Command::new(program)
+            .args(&opt.args)
+            .spawn()
+            .expect("Failed to start process");
+        Pid::from_raw(child.id() as i32)
+    } else {
+        eprintln!("Error: Either a PID or a program to execute must be provided.");
         return;
-    }
+    };
 
-    // 실행할 프로그램과 인자 설정
-    let program = &args[1];
-    let program_args = &args[2..];
-
-    // 자식 프로세스 실행
-    let child = Command::new(program)
-        .args(program_args)
-        .spawn()
-        .expect("Failed to start process");
-
-    let pid = Pid::from_raw(child.id() as i32);
-    println!("Monitoring PID: {}", pid);
-
-    // 시스템 콜 추적 시작
-    tracer::trace_process(pid);
+    tracer::trace_process(pid, opt.verbose);
 }
